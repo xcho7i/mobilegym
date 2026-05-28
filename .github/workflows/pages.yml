@@ -1,0 +1,75 @@
+name: Deploy GitHub Pages
+
+# 部署只在 demo 分支进行（main 已不再部署网站）。
+# demo 把 landing 放在根（mobilegym.dev/）、模拟器放在 /sim/，
+# 使 landing 能同源嵌入交互 demo，且根路径成为可索引的 SEO 主页。
+on:
+  push:
+    branches: [demo]
+    paths:
+      - 'web/**'
+      - 'apps/**'
+      - 'os/**'
+      - 'system/**'
+      - 'public/**'
+      - 'index.html'
+      - 'main.tsx'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/build-demo-site.sh'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:  # 允许在 GitHub UI 上手动触发
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      # 单一脚本：build(base=/sim/) + assemble(_site) + landing 重写。
+      # 与本地 `scripts/build-demo-site.sh` 完全一致，保证本地验证 == 线上行为。
+      - name: Build demo site
+        env:
+          VITE_CDN_BASE: https://cdn.mobilegym.dev
+          VITE_AI_BASE_URL: https://api.mobilegym.dev/ai/v1
+          VITE_AI_MODEL: qwen-flash
+          VITE_GOOGLE_MAPS_API_KEY: ${{ secrets.VITE_GOOGLE_MAPS_API_KEY }}
+        run: |
+          chmod +x scripts/build-demo-site.sh
+          scripts/build-demo-site.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
